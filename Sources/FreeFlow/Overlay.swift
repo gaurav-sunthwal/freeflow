@@ -24,15 +24,27 @@ final class OverlayController {
         let size = NSSize(width: 220, height: 44)
         panel = NSPanel(contentRect: NSRect(origin: .zero, size: size),
                         styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        panel.level = .statusBar
+        // Full-screen apps (e.g. Chrome in full screen) live in their own Space above normal windows;
+        // the panel needs a high level plus the Space behaviours below to appear on top of them.
+        panel.level = .screenSaver
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
         panel.ignoresMouseEvents = true
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         let host = NSHostingView(rootView: OverlayView(model: model))
         host.frame = NSRect(origin: .zero, size: size)
         panel.contentView = host
+
+        // Re-show on the new Space if the user switches to/from a full-screen app mid-dictation.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self, self.model.phase != .hidden else { return }
+            self.show()
+        }
     }
 
     func set(_ phase: OverlayModel.Phase) {
