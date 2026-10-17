@@ -1,0 +1,8 @@
+.build/
+dist/
+.swiftpm/
+.build-errors.log
+.DS_Store
+*.certSigningRequest
+*.p12
+*.cer
