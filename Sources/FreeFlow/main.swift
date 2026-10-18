@@ -41,6 +41,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item(recording ? "Stop Hands-free Dictation" : "Start Hands-free Dictation", #selector(toggleHandsFree), ""))
         menu.addItem(item("Paste Last Transcript", #selector(pasteLast), ""))
         menu.addItem(.separator())
+        menu.addItem(.separator())
+        switch Updater.shared.status {
+        case .building(let v):
+            let i = NSMenuItem(title: "Preparing update \(v)…", action: nil, keyEquivalent: "")
+            i.isEnabled = false
+            menu.addItem(i)
+        case .ready(let v):
+            let i = NSMenuItem(title: "Update \(v) will install when you stop dictating", action: nil, keyEquivalent: "")
+            i.isEnabled = false
+            menu.addItem(i)
+        default:
+            menu.addItem(item("Check for Updates…", #selector(checkForUpdates), ""))
+        }
         menu.addItem(item("Settings…", #selector(openSettings), ","))
         menu.addItem(item("Setup & Permissions", #selector(openSetup), ""))
         menu.addItem(.separator())
@@ -60,6 +73,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func pasteLast() {
         // Give the menu time to close so focus returns to the previous app.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { Coordinator.shared.pasteLast() }
+    }
+    @objc private func checkForUpdates() {
+        Task {
+            await Updater.shared.check(userInitiated: true)
+            switch Updater.shared.status {
+            case .upToDate: Coordinator.shared.overlay.set(.message("FreeFlow \(Updater.shared.currentVersion) is up to date"))
+            case .failed(let m): Coordinator.shared.overlay.set(.message(m))
+            default: break
+            }
+        }
+        Coordinator.shared.overlay.set(.message("Checking for updates…"))
     }
     @objc private func quit() { NSApp.terminate(nil) }
 

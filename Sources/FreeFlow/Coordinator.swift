@@ -24,6 +24,7 @@ final class Coordinator: ObservableObject {
     func start() {
         // If FreeFlow quit while it had muted other audio, give the user their sound back.
         AudioDevices.restoreOutput()
+        Updater.shared.startAutomaticChecks()
         hotkeys.isRecording = { [weak self] in
             // Read from the event-tap thread; a stale value is harmless here.
             MainActor.assumeIsolated { self?.state == .recording }

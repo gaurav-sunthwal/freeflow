@@ -5,6 +5,10 @@
 #   One-liner:      curl -fsSL https://raw.githubusercontent.com/gaurav-sunthwal/freeflow/main/install.sh | bash
 #
 # The installed app is self-contained: once this finishes you can delete the source folder.
+#
+# Used by FreeFlow's built-in updater:
+#   FREEFLOW_REF=v1.2.0        build that tag/branch instead of main
+#   FREEFLOW_STAGE_DIR=/path   only build, copy FreeFlow.app there, and don't install or launch
 set -euo pipefail
 
 REPO_URL="https://github.com/gaurav-sunthwal/freeflow.git"
@@ -40,7 +44,53 @@ else
   SRC="$(mktemp -d)/freeflow"
   trap 'rm -rf "$(dirname "$SRC")"' EXIT
   step "Downloading FreeFlow…"
-  git clone --depth 1 --quiet "$REPO_URL" "$SRC"
+  git clone --depth 1 --quiet ${FREEFLOW_REF:+--branch "$FREEFLOW_REF"} "$REPO_URL" "$SRC"
+fi
+
+# --- Signing ---------------------------------------------------------------
+# macOS ties Microphone/Accessibility permissions to an app's code signature. Without a developer
+# certificate every rebuild looks like a brand-new app and permissions are lost on each update, so we
+# create a permanent local signing certificate once per Mac and reuse it for every build.
+has_dev_identity() {
+  security find-identity -v -p codesigning 2>/dev/null | grep -qE "Developer ID Application|Apple Development"
+}
+if [[ -z "${FREEFLOW_SIGN_IDENTITY:-}" ]] && ! has_dev_identity; then
+  SIGN_DIR="$HOME/Library/Application Support/FreeFlow/signing"
+  KEYCHAIN="$SIGN_DIR/freeflow-signing.keychain-db"
+  mkdir -p "$SIGN_DIR"; chmod 700 "$SIGN_DIR"
+  if [[ ! -f "$KEYCHAIN" || ! -f "$SIGN_DIR/identity" ]]; then
+    step "Creating a local signing certificate (one time, keeps permissions across updates)…"
+    rm -f "$KEYCHAIN"
+    WORK="$(mktemp -d)"
+    openssl rand -hex 24 > "$SIGN_DIR/keychain-password"; chmod 600 "$SIGN_DIR/keychain-password"
+    cat > "$WORK/cert.cnf" <<'CNF'
+[req]
+distinguished_name = dn
+x509_extensions = ext
+prompt = no
+[dn]
+CN = FreeFlow Local Signing
+[ext]
+basicConstraints = critical,CA:false
+keyUsage = critical,digitalSignature
+extendedKeyUsage = critical,codeSigning
+CNF
+    openssl req -x509 -newkey rsa:2048 -nodes -keyout "$WORK/key.pem" -out "$WORK/cert.pem" \
+      -days 7300 -config "$WORK/cert.cnf" 2>/dev/null
+    openssl pkcs12 -export -inkey "$WORK/key.pem" -in "$WORK/cert.pem" -out "$WORK/id.p12" \
+      -passout pass:freeflow -name "FreeFlow Local Signing" 2>/dev/null
+    KC_PASS="$(cat "$SIGN_DIR/keychain-password")"
+    security create-keychain -p "$KC_PASS" "$KEYCHAIN"
+    security set-keychain-settings "$KEYCHAIN"   # never auto-lock
+    security unlock-keychain -p "$KC_PASS" "$KEYCHAIN"
+    security import "$WORK/id.p12" -k "$KEYCHAIN" -P freeflow -T /usr/bin/codesign >/dev/null
+    security set-key-partition-list -S apple-tool:,apple: -k "$KC_PASS" "$KEYCHAIN" >/dev/null 2>&1
+    openssl x509 -in "$WORK/cert.pem" -noout -fingerprint -sha1 | cut -d= -f2 | tr -d : > "$SIGN_DIR/identity"
+    rm -rf "$WORK"
+  fi
+  security unlock-keychain -p "$(cat "$SIGN_DIR/keychain-password")" "$KEYCHAIN"
+  export FREEFLOW_SIGN_IDENTITY="$(cat "$SIGN_DIR/identity")"
+  export FREEFLOW_SIGN_KEYCHAIN="$KEYCHAIN"
 fi
 
 # --- Build -----------------------------------------------------------------
@@ -48,6 +98,14 @@ step "Building FreeFlow (first build takes a minute)…"
 "$SRC/build.sh" >/dev/null 2>"$SRC/.build-errors.log" || { cat "$SRC/.build-errors.log" >&2; fail "Build failed."; }
 APP_SRC="$SRC/dist/FreeFlow.app"
 [[ -d "$APP_SRC" ]] || fail "Build did not produce FreeFlow.app."
+
+if [[ -n "${FREEFLOW_STAGE_DIR:-}" ]]; then
+  mkdir -p "$FREEFLOW_STAGE_DIR"
+  rm -rf "$FREEFLOW_STAGE_DIR/FreeFlow.app"
+  ditto "$APP_SRC" "$FREEFLOW_STAGE_DIR/FreeFlow.app"
+  echo "Staged $FREEFLOW_STAGE_DIR/FreeFlow.app"
+  exit 0
+fi
 
 # --- Install ---------------------------------------------------------------
 DEST_DIR="/Applications"

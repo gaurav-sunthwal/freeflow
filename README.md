@@ -76,6 +76,17 @@ Want different models? In Settings you can point FreeFlow at a local
 [whisper.cpp](https://github.com/ggml-org/whisper.cpp) server or a local LLM through
 [Ollama](https://ollama.com) or LM Studio.
 
+## Updates
+
+FreeFlow updates itself. A few times a day it checks for a new release on GitHub. When it finds one, it builds
+the release in the background, waits until you aren't dictating, then restarts as the new version. Your history,
+settings and permissions are kept.
+
+- Check right away: menu-bar icon → **Check for Updates…**
+- Turn auto-updates off: FreeFlow → Settings → Updates.
+
+Versions older than 1.1.0 don't have the updater yet. Run the install command once more to get it.
+
 ## Uninstall
 
 ```bash
@@ -95,11 +106,9 @@ curl -fsSL https://raw.githubusercontent.com/gaurav-sunthwal/freeflow/main/unins
 |---|---|
 | Holding `fn` does nothing | Menu-bar icon → **Setup & Permissions**. If Accessibility is on but it still doesn't work, remove FreeFlow from System Settings → Privacy & Security → Accessibility, add it again, and relaunch |
 | Emoji picker pops up | System Settings → Keyboard → "Press 🌐 key to" → **Do Nothing**, or choose another hotkey in Settings |
-| Permissions reset after updating | Expected for builds that aren't signed with a developer certificate. Grant them again once |
+| Permissions reset after updating | Happens once when moving from a version older than 1.1.0. After that, permissions are kept across updates |
 | "Developer tools are too old" | Update Xcode or the Command Line Tools to 26+ via Software Update |
 | Corrections / Command Mode don't work | Turn on Apple Intelligence in System Settings → Apple Intelligence & Siri |
-
-**To update** to the latest version, run the install command again.
 
 ## How it works
 
@@ -133,6 +142,16 @@ $B --process "Send it to John, I mean Sarah, by Friday."    # test the text pipe
 say -o /tmp/t.aiff "hello world new line second line" && $B --selftest /tmp/t.aiff
 ./make-dmg.sh                 # optional: packaged DMG (Developer ID + NOTARY_PROFILE to notarize)
 ```
+
+### Publishing a release
+
+```bash
+./release.sh 1.2.0 "Faster corrections and a new mic picker"
+```
+
+This sets the version, checks that the app builds, commits, tags `v1.2.0`, pushes, and creates the GitHub release.
+Installed copies pick it up automatically. Pushes to `main` without a release don't reach existing users,
+so you can push work in progress safely.
 
 Contributions are welcome. Open an issue or a pull request.
 

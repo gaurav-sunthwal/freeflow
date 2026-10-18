@@ -225,6 +225,7 @@ struct StyleView: View {
 
 struct SettingsView: View {
     @ObservedObject var settings = Settings.shared
+    @ObservedObject var updater = Updater.shared
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var mics: [AudioInputDevice] = []
     @State private var assetStatus = ""
@@ -265,16 +266,25 @@ struct SettingsView: View {
             }
             Section {
                 Picker("Microphone", selection: $settings.micDevice) {
-                    Text("Automatic").tag("")
-                    Text("System default").tag("system")
+                    Text("Automatic (current system mic)").tag("")
                     ForEach(mics) { Text($0.name).tag($0.uid) }
                 }
                 Toggle("Mute other audio while dictating", isOn: $settings.muteWhileDictating)
                 Toggle("Show live preview in the Flow bar", isOn: $settings.livePreview)
             } header: { Text("Microphone") } footer: {
-                Text("Automatic uses your Mac's built-in mic when you're wearing Bluetooth headphones, so music and videos keep playing in full quality instead of switching to \"phone call\" sound.")
+                Text("A headset or earbud mic is closest to your mouth and works best in noisy places. Pick your Mac's built-in mic instead if you'd rather keep Bluetooth headphones in full audio quality while dictating.")
             }
             .onAppear { mics = AudioDevices.inputDevices() }
+            Section("Updates") {
+                Toggle("Install updates automatically", isOn: $settings.autoUpdate)
+                HStack {
+                    Text("Version \(updater.currentVersion)")
+                    Spacer()
+                    Text(updateStatus).foregroundStyle(.secondary)
+                    Button("Check Now") { Task { await updater.check(userInitiated: true) } }
+                        .disabled(updater.status == .checking)
+                }
+            }
             Section("Behaviour") {
                 Toggle("Launch FreeFlow at login", isOn: Binding(
                     get: { launchAtLogin },
@@ -290,6 +300,19 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .padding(12)
+    }
+}
+
+extension SettingsView {
+    var updateStatus: String {
+        switch updater.status {
+        case .idle: return ""
+        case .checking: return "Checking…"
+        case .upToDate: return "Up to date ✓"
+        case .building(let v): return "Preparing \(v)…"
+        case .ready(let v): return "\(v) installs when you stop dictating"
+        case .failed(let m): return m
+        }
     }
 }
 

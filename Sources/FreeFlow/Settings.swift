@@ -85,6 +85,7 @@ final class Settings: ObservableObject {
     @Published var micDevice: String { didSet { d.set(micDevice, forKey: "micDevice") } }
     @Published var muteWhileDictating: Bool { didSet { d.set(muteWhileDictating, forKey: "muteWhileDictating") } }
     @Published var livePreview: Bool { didSet { d.set(livePreview, forKey: "livePreview") } }
+    @Published var autoUpdate: Bool { didSet { d.set(autoUpdate, forKey: "autoUpdate") } }
     @Published var customInstructions: String { didSet { d.set(customInstructions, forKey: "customInstructions") } }
     @Published var dictionary: [DictionaryEntry] { didSet { save(dictionary, "dictionary") } }
     @Published var snippets: [Snippet] { didSet { save(snippets, "snippets") } }
@@ -107,6 +108,7 @@ final class Settings: ObservableObject {
         micDevice = d.string(forKey: "micDevice") ?? ""
         muteWhileDictating = d.object(forKey: "muteWhileDictating") as? Bool ?? true
         livePreview = d.object(forKey: "livePreview") as? Bool ?? true
+        autoUpdate = d.object(forKey: "autoUpdate") as? Bool ?? true
         customInstructions = d.string(forKey: "customInstructions") ?? ""
         dictionary = Settings.load("dictionary") ?? []
         snippets = Settings.load("snippets") ?? []

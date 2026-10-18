@@ -63,19 +63,16 @@ enum AudioDevices {
         }
     }
 
-    /// The microphone FreeFlow should record from for the given preference.
-    /// "auto": when the default mic is Bluetooth (AirPods etc.) use the Mac's built-in mic instead, so the
-    /// headphones stay in high-quality playback mode instead of dropping to "phone call" audio.
+    /// The microphone FreeFlow should record from for the given preference (nil = system default).
+    /// "auto" uses the current system mic: a headset mic sits next to the mouth and hears far less of the room
+    /// than the Mac's built-in mic, which matters much more for accuracy than headphone playback quality
+    /// (other audio is muted while dictating anyway).
     static func inputDeviceUID(for preference: String) -> String? {
-        let devices = inputDevices()
         switch preference {
-        case "system":
+        case "", "auto", "system":
             return nil
-        case "", "auto":
-            guard let def = defaultInput, isBluetooth(def) else { return nil }
-            return devices.first(where: \.isBuiltIn)?.uid
         default:
-            return devices.first { $0.uid == preference }?.uid
+            return inputDevices().first { $0.uid == preference }?.uid
         }
     }
 

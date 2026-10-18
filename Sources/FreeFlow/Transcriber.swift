@@ -58,6 +58,9 @@ final class AppleSpeechSession: TranscriptionSession {
     private var analyzer: SpeechAnalyzer?
     private var resultsTask: Task<String, Error>?
     private var setupTask: Task<Void, Error>?
+    /// Latest live text, returned if finalizing ever stalls.
+    private var lastLive = ""
+    private var receivedAudio = false
 
     init(locale: Locale, vocabulary: [String], inputFormat: AVAudioFormat) {
         setupTask = Task { [weak self] in
@@ -83,6 +86,7 @@ final class AppleSpeechSession: TranscriptionSession {
                     let piece = String(r.text.characters)
                     if r.isFinal { text += piece }
                     let live = r.isFinal ? text : text + piece
+                    self?.lock.withLock { self?.lastLive = live }
                     DispatchQueue.main.async { self?.onPartial?(live) }
                 }
                 return text
@@ -110,6 +114,7 @@ final class AppleSpeechSession: TranscriptionSession {
         // Audio taps reuse buffers, so copy before queueing.
         guard let copy = buffer.copy() as? AVAudioPCMBuffer else { return }
         let ready = lock.withLock { () -> Bool in
+            receivedAudio = true
             if continuation == nil { pending.append(copy); return false }
             return true
         }
@@ -135,11 +140,30 @@ final class AppleSpeechSession: TranscriptionSession {
     }
 
     func finish(samples16k: [Float]) async throws -> String {
-        try await setupTask?.value
-        let (cont, analyzer, results) = lock.withLock { (continuation, self.analyzer, resultsTask) }
-        cont?.finish()
-        try await analyzer?.finalizeAndFinishThroughEndOfInput()
-        return try await results?.value.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        // With no audio at all the analyzer never finishes — don't wait on it.
+        guard lock.withLock({ receivedAudio }) else { cancel(); return "" }
+        let work = Task { () -> String in
+            try await self.setupTask?.value
+            let (cont, analyzer, results) = self.lock.withLock { (self.continuation, self.analyzer, self.resultsTask) }
+            cont?.finish()
+            try await analyzer?.finalizeAndFinishThroughEndOfInput()
+            return try await results?.value ?? ""
+        }
+        // Safety net: never leave the user stuck on "Transcribing…".
+        let timeout = Task {
+            try await Task.sleep(for: .seconds(15))
+            work.cancel()
+        }
+        defer { timeout.cancel() }
+        do {
+            let text = try await work.value
+            return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            let partial = lock.withLock { lastLive }
+            cancel()
+            if partial.isEmpty { throw error }
+            return partial.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
     }
 
     func cancel() {
