@@ -38,7 +38,10 @@ final class Coordinator: ObservableObject {
         recorder.onLevel = { [weak self] level in
             DispatchQueue.main.async { self?.overlay.model.push(level: level) }
         }
-        if settings.engine == .apple {
+        if settings.engine == .whisperLocal {
+            Task.detached { await WhisperEngine.shared.preload() }
+        }
+        if settings.engine != .whisperAPI {
             let locale = settings.localeID
             Task.detached { try? await Transcribers.prepareAppleAssets(localeID: locale) }
         }
@@ -85,6 +88,10 @@ final class Coordinator: ObservableObject {
                 }
             }
             recorder.onBuffer = { [weak s] buf in s?.append(buf) }
+            recorder.onReady = { [weak self] in
+                guard let self, self.state == .recording else { return }
+                if self.settings.playSounds { NSSound(named: "Tink")?.play() }
+            }
             try recorder.start(deviceUID: AudioDevices.inputDeviceUID(for: settings.micDevice))
         } catch {
             recorder.stop()
@@ -97,7 +104,6 @@ final class Coordinator: ObservableObject {
         overlay.model.commandMode = command
         overlay.model.handsFree = handsFree
         overlay.set(.listening)
-        if settings.playSounds { NSSound(named: "Tink")?.play() }
         if settings.muteWhileDictating {
             // Let the start sound play, then silence videos/music until the user stops talking.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
@@ -141,6 +147,11 @@ final class Coordinator: ObservableObject {
             defer { self.state = .idle }
             do {
                 let raw = try await session.finish(samples16k: samples)
+                Diagnostics.record(samples: samples, info: [
+                    "mic": recorder.deviceName, "firstAudioDelay": recorder.firstAudioDelay ?? -1,
+                    "heldSeconds": duration, "audioSeconds": Double(samples.count) / 16_000,
+                    "peak": peak, "raw": raw, "app": app?.bundleIdentifier ?? "",
+                ])
                 guard !raw.isEmpty else {
                     // Silence usually means the wrong or a muted microphone was picked up.
                     overlay.set(duration > 1 && peak < 0.02 ? .message("No sound detected — check your microphone in Settings") : .hidden)
@@ -167,6 +178,8 @@ final class Coordinator: ObservableObject {
                     return
                 }
                 TextInserter.insert(output, restoreClipboard: settings.restoreClipboard)
+                // Everything below runs after the text is already in the user's app.
+                defer { AccountService.shared.scheduleSync() }
                 history.add(HistoryItem(date: Date(), raw: raw, text: output,
                                         app: app?.localizedName ?? "Unknown", duration: duration, isCommand: command))
                 overlay.set(.hidden)

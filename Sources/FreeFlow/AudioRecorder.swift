@@ -16,6 +16,11 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
     private var converter: AVAudioConverter?
     private(set) var startedAt = Date()
     private(set) var peakLevel: Float = 0
+    /// Seconds from `start` until the microphone delivered its first audio (nil until then).
+    private(set) var firstAudioDelay: TimeInterval?
+    private(set) var deviceName = ""
+    /// Called once on the main queue when audio actually starts flowing.
+    var onReady: (() -> Void)?
 
     /// Called on the audio queue with each captured buffer (16 kHz mono Float32).
     var onBuffer: ((AVAudioPCMBuffer) -> Void)?
@@ -38,6 +43,7 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
             throw NSError(domain: "FreeFlow", code: 2, userInfo: [NSLocalizedDescriptionKey: "Can't use \(device.localizedName)"])
         }
         session.addInput(input)
+        deviceName = device.localizedName
         let output = AVCaptureAudioDataOutput()
         output.audioSettings = [
             AVFormatIDKey: kAudioFormatLinearPCM,
@@ -55,6 +61,7 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
 
         lock.withLock { samples16k.removeAll(keepingCapacity: true) }
         peakLevel = 0
+        firstAudioDelay = nil
         converter = nil
         self.session = session
         startedAt = Date()
@@ -79,6 +86,11 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
 
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard session != nil, let buffer = pcmBuffer(from: sampleBuffer) else { return }
+        if firstAudioDelay == nil {
+            firstAudioDelay = Date().timeIntervalSince(startedAt)
+            let ready = onReady
+            DispatchQueue.main.async { ready?() }
+        }
         onBuffer?(buffer)
         guard let ch = buffer.floatChannelData?[0] else { return }
         let n = Int(buffer.frameLength)

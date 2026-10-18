@@ -1,5 +1,6 @@
 import Foundation
 import FoundationModels
+import NaturalLanguage
 
 /// What kind of app the user is dictating into — drives the formatting style (Wispr calls these "Styles").
 enum AppContext {
@@ -32,7 +33,7 @@ enum TextProcessor {
     // MARK: Dictation pipeline
 
     static func process(_ raw: String, appBundleID: String?, settings: Settings) async -> String {
-        var text = applyDictionary(raw, settings.dictionary)
+        var text = applyDictionary(applyTechFixes(smoothSpeech(raw)), settings.dictionary)
         if let snippet = matchSnippet(text, settings.snippets) { return snippet }
         text = applySpokenCommands(text)
 
@@ -53,7 +54,7 @@ enum TextProcessor {
             }
         }
         text = expandInlineSnippets(text, settings.snippets)
-        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return capitalizeSentences(text.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     // MARK: Self-corrections
@@ -158,6 +159,109 @@ enum TextProcessor {
         if Double(out.filter { !vocab.contains($0) }.count) / Double(out.count) > 0.2 { return false }
         if original.trimmingCharacters(in: .whitespaces).hasSuffix("?") && !cleaned.trimmingCharacters(in: .whitespaces).hasSuffix("?") { return false }
         return true
+    }
+
+    /// Smooths raw speech-to-text: joins sentences broken at pauses ("Will be... Lesser" → "will be lesser",
+    /// "issues. With the" → "issues with the"), and drops fillers and restarts ("getting... getting", ", like,").
+    static func smoothSpeech(_ text: String) -> String {
+        var t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        func sub(_ p: String, _ r: String) { t = t.replacingOccurrences(of: p, with: r, options: .regularExpression) }
+
+        // Hesitation ellipses: "word... Next" continues the same sentence.
+        sub("\\s*(\\.{3}|…)\\s*(?=[A-Za-z])", " ")
+        sub("\\s*(\\.{3}|…)\\s*$", ".")
+        // A full stop right before a word that can't start a sentence is a pause, not an ending.
+        let joiners = "with|and|but|or|so that|because|to|of|for|in|on|at|from|than|which|who|that|like|being|getting|will|would|is|are|was|were"
+        sub("(?<=[a-z0-9])\\.\\s+(?=(?i:\(joiners))\\b)", " ")
+        // Fillers.
+        sub("(?i),\\s*like,\\s*", ", ")
+        sub("(?i)(^|[.!?]\\s+)(?:like|so|um|uh),\\s+", "$1")
+        // Fillers the user asked to remove (Insights → Filler words).
+        for f in Settings.shared.autoRemoveFillers {
+            sub("(?i)(^|(?<=[\\s,]))" + NSRegularExpression.escapedPattern(for: f) + "\\b,?\\s*", "")
+        }
+        sub("\\s+,", ",")
+        sub("^,\\s*", "")
+        // Immediate restarts: "getting getting", "the the".
+        sub("(?i)\\b(\\w+)(\\s+\\1\\b)+", "$1")
+        sub("(?i)\\bfree ?flow\\b", "FreeFlow")
+        sub("\\s{2,}", " ")
+        return capitalizeSentences(lowercaseMidSentence(t))
+    }
+
+    /// Capitalises the first letter of the text and of every sentence. A sentence ends at . ! ? followed by
+    /// whitespace, so "example.com" and "Node.js" are left alone.
+    static func capitalizeSentences(_ text: String) -> String {
+        var chars = Array(text)
+        var start = true
+        for i in chars.indices {
+            let c = chars[i]
+            if c.isLetter {
+                if start { chars[i] = Character(c.uppercased()) }
+                start = false
+            } else if c == "\n" {
+                start = true
+            } else if ".!?".contains(c), i + 1 < chars.count, chars[i + 1].isWhitespace {
+                start = true
+            }
+        }
+        return String(chars)
+    }
+
+    /// After joining, words that were capitalised only because a chunk started there are lowercased —
+    /// unless they're names (detected with Apple's NaturalLanguage tagger), "I", or acronyms.
+    private static func lowercaseMidSentence(_ text: String) -> String {
+        let tagger = NLTagger(tagSchemes: [.nameType])
+        tagger.string = text
+        var result = text
+        var replacements: [(Range<String.Index>, String)] = []
+        tagger.enumerateTags(in: text.startIndex..<text.endIndex, unit: .word, scheme: .nameType,
+                             options: [.omitWhitespace, .omitPunctuation, .joinNames]) { tag, range in
+            let word = String(text[range])
+            guard range.lowerBound > text.startIndex, let first = word.first, first.isUppercase,
+                  word != "I", !word.hasPrefix("I'"), word.dropFirst().allSatisfy({ $0.isLowercase || $0 == "'" }),
+                  tag != .personalName, tag != .placeName, tag != .organizationName else { return true }
+            // Only if it's mid-sentence (previous non-space character isn't sentence-ending punctuation).
+            let before = text[..<range.lowerBound].last { !$0.isWhitespace }
+            if let b = before, !".!?\n".contains(b), !knownCasing.contains(word) {
+                replacements.append((range, word.lowercased()))
+            }
+            return true
+        }
+        for (range, w) in replacements.reversed() { result.replaceSubrange(range, with: w) }
+        return result
+    }
+
+    private static let knownCasing: Set<String> = ["FreeFlow", "GitHub", "Vercel", "README", "Monday", "Tuesday",
+        "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "English", "Hindi", "Google", "Apple", "Whisper"]
+
+    /// Context-aware fixes for tech words speech models commonly mishear. Each rule needs surrounding
+    /// context (e.g. "deploy … on") so ordinary sentences are never touched.
+    static func applyTechFixes(_ text: String) -> String {
+        let rules: [(String, String)] = [
+            ("(?i)\\s*(?:read ?me|redme|redmi|ready me)\\s*(?:\\.|dot)\\s*(?:md|nd|m d)\\b", " README.md"),
+            ("(?i)\\b(?:read ?me|redme|redmi)(?=\\s+file)", "README"),
+            ("(?i)\\b(?:dot|\\.)\\s*(?:md|nd|m d)\\s+file\\b", ".md file"),
+            ("(?i)\\b(deploy(?:ed|ing)?(?: it| this| the app)? (?:on|to) )(?:vessel|versal|vercell)\\b", "$1Vercel"),
+            ("(?i)\\bgit hub\\b", "GitHub"),
+            ("(?i)\\bnext ?js\\b|\\bnext dot js\\b", "Next.js"),
+            ("(?i)\\bnode ?js\\b|\\bnode dot js\\b", "Node.js"),
+            ("(?i)\\bjason file\\b", "JSON file"),
+        ]
+        var out = text
+        for (p, r) in rules {
+            out = out.replacingOccurrences(of: p, with: r, options: .regularExpression)
+        }
+        // Correct capitalisation of known tech names ("github" → "GitHub", "node.js" → "Node.js").
+        for term in ["FreeFlow", "GitHub", "Vercel", "Next.js", "Node.js", "TypeScript", "JavaScript", "README", "macOS", "iOS",
+                     "Xcode", "ChatGPT", "OpenAI", "Supabase", "Firebase", "npm", "JSON", "API",
+                     "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+                     "January", "February", "April", "June", "July", "August", "September", "October",
+                     "November", "December"] {
+            let pattern = "(?i)(?<![\\w.])" + NSRegularExpression.escapedPattern(for: term) + "(?![\\w])"
+            out = out.replacingOccurrences(of: pattern, with: NSRegularExpression.escapedTemplate(for: term), options: .regularExpression)
+        }
+        return out.replacingOccurrences(of: "  +", with: " ", options: .regularExpression)
     }
 
     static func applyDictionary(_ text: String, _ dict: [DictionaryEntry]) -> String {

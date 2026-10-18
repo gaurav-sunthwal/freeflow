@@ -15,12 +15,13 @@ enum HotkeyChoice: String, CaseIterable, Identifiable, Codable {
 }
 
 enum TranscriptionEngine: String, CaseIterable, Identifiable, Codable {
-    case apple, whisperAPI
+    case whisperLocal, apple, whisperAPI
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .apple: return "Apple On-Device (free, private)"
-        case .whisperAPI: return "Whisper-compatible server (whisper.cpp, LocalAI, …)"
+        case .whisperLocal: return "Whisper Turbo — most accurate (on-device)"
+        case .apple: return "Apple — fastest (on-device)"
+        case .whisperAPI: return "Custom Whisper server (advanced)"
         }
     }
 }
@@ -86,13 +87,18 @@ final class Settings: ObservableObject {
     @Published var muteWhileDictating: Bool { didSet { d.set(muteWhileDictating, forKey: "muteWhileDictating") } }
     @Published var livePreview: Bool { didSet { d.set(livePreview, forKey: "livePreview") } }
     @Published var autoUpdate: Bool { didSet { d.set(autoUpdate, forKey: "autoUpdate") } }
+    @Published var dailyGoal: Int { didSet { d.set(dailyGoal, forKey: "dailyGoal") } }
+    /// Filler words the user chose (in Insights) to strip from every dictation.
+    @Published var autoRemoveFillers: [String] { didSet { d.set(autoRemoveFillers, forKey: "autoRemoveFillers") } }
+    /// Days to keep dictation history (0 = forever).
+    @Published var historyRetentionDays: Int { didSet { d.set(historyRetentionDays, forKey: "historyRetentionDays") } }
     @Published var customInstructions: String { didSet { d.set(customInstructions, forKey: "customInstructions") } }
     @Published var dictionary: [DictionaryEntry] { didSet { save(dictionary, "dictionary") } }
     @Published var snippets: [Snippet] { didSet { save(snippets, "snippets") } }
 
     private init() {
         hotkey = HotkeyChoice(rawValue: d.string(forKey: "hotkey") ?? "") ?? .fn
-        engine = TranscriptionEngine(rawValue: d.string(forKey: "engine") ?? "") ?? .apple
+        engine = TranscriptionEngine(rawValue: d.string(forKey: "engine") ?? "") ?? .whisperLocal
         localeID = d.string(forKey: "localeID") ?? Locale.current.identifier
         whisperBaseURL = d.string(forKey: "whisperBaseURL") ?? "http://127.0.0.1:8080/v1"
         whisperAPIKey = d.string(forKey: "whisperAPIKey") ?? ""
@@ -109,6 +115,9 @@ final class Settings: ObservableObject {
         muteWhileDictating = d.object(forKey: "muteWhileDictating") as? Bool ?? true
         livePreview = d.object(forKey: "livePreview") as? Bool ?? true
         autoUpdate = d.object(forKey: "autoUpdate") as? Bool ?? true
+        historyRetentionDays = d.object(forKey: "historyRetentionDays") as? Int ?? 15
+        dailyGoal = d.object(forKey: "dailyGoal") as? Int ?? 500
+        autoRemoveFillers = d.stringArray(forKey: "autoRemoveFillers") ?? []
         customInstructions = d.string(forKey: "customInstructions") ?? ""
         dictionary = Settings.load("dictionary") ?? []
         snippets = Settings.load("snippets") ?? []

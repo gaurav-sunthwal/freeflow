@@ -3,116 +3,94 @@ import AppKit
 import ServiceManagement
 
 enum Pane: String, CaseIterable, Identifiable {
-    case home = "Home", dictionary = "Dictionary", snippets = "Snippets", style = "Style", settings = "Settings", setup = "Setup"
+    case home = "Home", insights = "Insights", dictionary = "Dictionary", snippets = "Snippets", style = "Style", account = "Account", settings = "Settings", setup = "Setup"
     var id: String { rawValue }
     var icon: String {
         switch self {
-        case .home: return "house"
+        case .home: return "square.grid.2x2"
+        case .insights: return "chart.line.uptrend.xyaxis"
         case .dictionary: return "character.book.closed"
         case .snippets: return "text.badge.plus"
-        case .style: return "paintbrush"
+        case .style: return "wand.and.stars"
+        case .account: return "person.crop.circle"
         case .settings: return "gearshape"
         case .setup: return "checkmark.shield"
         }
     }
+    static let main: [Pane] = [.home, .insights, .dictionary, .snippets, .style]
+    static let system: [Pane] = [.account, .settings, .setup]
 }
 
 struct MainView: View {
     @State var pane: Pane
     @ObservedObject var permissions = Permissions.shared
+    @ObservedObject var history = HistoryStore.shared
 
     var body: some View {
         NavigationSplitView {
-            List(Pane.allCases, selection: $pane) { p in
-                Label(p.rawValue, systemImage: p.icon).tag(p)
+            List(selection: $pane) {
+                Section {
+                    ForEach(Pane.main) { p in Label(p.rawValue, systemImage: p.icon).tag(p) }
+                }
+                Section {
+                    ForEach(Pane.system) { p in
+                        Label {
+                            HStack {
+                                Text(p.rawValue)
+                                if p == .setup && !permissions.allGranted {
+                                    Spacer()
+                                    Circle().fill(.orange).frame(width: 7, height: 7)
+                                }
+                            }
+                        } icon: { Image(systemName: p.icon) }
+                        .tag(p)
+                    }
+                }
             }
-            .navigationSplitViewColumnWidth(170)
+            .safeAreaInset(edge: .top) { brand }
+            .safeAreaInset(edge: .bottom) { streakBadge }
+            .navigationSplitViewColumnWidth(min: 170, ideal: 180, max: 230)
         } detail: {
             Group {
                 switch pane {
-                case .home: HomeView()
+                case .home: HomeView(openAccount: { pane = .account })
+                case .insights: InsightsView()
                 case .dictionary: DictionaryView()
                 case .snippets: SnippetsView()
                 case .style: StyleView()
+                case .account: AccountView()
                 case .settings: SettingsView()
                 case .setup: SetupView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .frame(minWidth: 760, minHeight: 520)
+        .frame(minWidth: 640, minHeight: 460)
         .onAppear { permissions.refresh() }
     }
-}
 
-// MARK: Home
-
-struct HomeView: View {
-    @ObservedObject var history = HistoryStore.shared
-    @ObservedObject var settings = Settings.shared
-    @ObservedObject var coordinator = Coordinator.shared
-    @State private var search = ""
-
-    var filtered: [HistoryItem] {
-        search.isEmpty ? history.items : history.items.filter { $0.text.localizedCaseInsensitiveContains(search) }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Welcome to FreeFlow").font(.largeTitle.bold())
-            Text("Hold **\(settings.hotkey.label)** and speak in any app. Double-tap for hands-free. Add **Control** for Command Mode.")
-                .foregroundStyle(.secondary)
-            if let err = coordinator.lastError {
-                Label(err, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
-            }
-            HStack(spacing: 12) {
-                StatCard(title: "Words dictated", value: "\(history.totalWords)")
-                StatCard(title: "Average WPM", value: "\(history.averageWPM)")
-                StatCard(title: "Day streak", value: "\(history.streakDays)")
-            }
-            HStack {
-                Text("History").font(.title2.bold())
-                Spacer()
-                TextField("Search", text: $search).textFieldStyle(.roundedBorder).frame(width: 200)
-                Button("Clear") { history.clear() }.disabled(history.items.isEmpty)
-            }
-            if filtered.isEmpty {
-                Text("Nothing yet — try dictating something.").foregroundStyle(.secondary).padding(.top, 20)
-            }
-            List(filtered) { item in
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(item.text).textSelection(.enabled)
-                        Text("\(item.date.formatted(date: .abbreviated, time: .shortened)) · \(item.app)\(item.isCommand ? " · Command" : "")")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button { copy(item.text) } label: { Image(systemName: "doc.on.doc") }.buttonStyle(.borderless)
-                    Button { history.delete(item) } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
-                }
-                .padding(.vertical, 4)
-            }
-            .listStyle(.inset)
+    private var brand: some View {
+        HStack(spacing: 10) {
+            Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 26, height: 26)
+            Text("FreeFlow").font(.headline)
+            Spacer()
         }
-        .padding(24)
+        .padding(.horizontal, 14).padding(.top, 4).padding(.bottom, 8)
     }
 
-    private func copy(_ s: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(s, forType: .string)
-    }
-}
-
-struct StatCard: View {
-    let title: String, value: String
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(value).font(.title.bold())
-            Text(title).font(.caption).foregroundStyle(.secondary)
+    private var streakBadge: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "flame.fill").foregroundStyle(history.streakDays > 0 ? Theme.flame : .secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("\(history.streakDays)-day streak").font(.callout.weight(.semibold))
+                Text(history.wordsToday > 0 ? "Done for today ✓" : "Dictate today to keep it")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            Spacer()
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.secondary.opacity(0.1)))
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.05)))
+        .padding(12)
     }
 }
 
@@ -125,7 +103,7 @@ struct DictionaryView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Dictionary").font(.largeTitle.bold())
+            PageHeader(title: "Dictionary")
             Text("Teach FreeFlow names, jargon and acronyms. Words are used as recognition hints; add a \"heard as\" spelling to auto-correct a common mistake.")
                 .foregroundStyle(.secondary)
             HStack {
@@ -160,7 +138,7 @@ struct SnippetsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Snippets").font(.largeTitle.bold())
+            PageHeader(title: "Snippets")
             Text("Say a short cue and FreeFlow types the full text — e.g. say \"my calendar link\" to insert your booking URL.")
                 .foregroundStyle(.secondary)
             TextField("Cue phrase (e.g. my calendar link)", text: $trigger).textFieldStyle(.roundedBorder)
@@ -225,6 +203,7 @@ struct StyleView: View {
 
 struct SettingsView: View {
     @ObservedObject var settings = Settings.shared
+    @ObservedObject var whisperModel = WhisperModel.shared
     @ObservedObject var updater = Updater.shared
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var mics: [AudioInputDevice] = []
@@ -244,7 +223,29 @@ struct SettingsView: View {
                     ForEach(TranscriptionEngine.allCases) { Text($0.label).tag($0) }
                 }
                 TextField("Language (locale ID, e.g. en_US, de_DE)", text: $settings.localeID)
-                if settings.engine == .apple {
+                if settings.engine == .whisperLocal {
+                    switch whisperModel.state {
+                    case .ready:
+                        HStack {
+                            Label("Whisper model ready", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                            Spacer()
+                            Button("Delete model", role: .destructive) { whisperModel.delete() }
+                        }
+                    case .downloading(let p):
+                        HStack {
+                            ProgressView(value: p)
+                            Text("\(Int(p * 100))%").monospacedDigit().foregroundStyle(.secondary)
+                            Button("Cancel") { whisperModel.cancel() }
+                        }
+                    case .missing, .failed:
+                        HStack {
+                            Button("Download Whisper model (\(WhisperModel.sizeLabel))") { whisperModel.download() }
+                            if case .failed(let m) = whisperModel.state { Text(m).foregroundStyle(.red) }
+                        }
+                        Text("One-time download, then works offline. Until it's ready, FreeFlow uses Apple's engine.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                } else if settings.engine == .apple {
                     HStack {
                         Button("Download language model") {
                             assetStatus = "Downloading…"
@@ -275,6 +276,19 @@ struct SettingsView: View {
                 Text("A headset or earbud mic is closest to your mouth and works best in noisy places. Pick your Mac's built-in mic instead if you'd rather keep Bluetooth headphones in full audio quality while dictating.")
             }
             .onAppear { mics = AudioDevices.inputDevices() }
+            Section {
+                Picker("Keep history for", selection: $settings.historyRetentionDays) {
+                    Text("7 days").tag(7)
+                    Text("15 days").tag(15)
+                    Text("30 days").tag(30)
+                    Text("90 days").tag(90)
+                    Text("Forever").tag(0)
+                }
+                .onChange(of: settings.historyRetentionDays) { HistoryStore.shared.pruneExpired() }
+                Button("Delete all history now", role: .destructive) { HistoryStore.shared.clear() }
+            } header: { Text("Privacy & storage") } footer: {
+                Text("Older dictations are deleted automatically. Your stats are kept. Everything stays on this Mac.")
+            }
             Section("Updates") {
                 Toggle("Install updates automatically", isOn: $settings.autoUpdate)
                 HStack {
@@ -321,17 +335,36 @@ extension SettingsView {
 struct SetupView: View {
     @ObservedObject var permissions = Permissions.shared
     @ObservedObject var settings = Settings.shared
+    @ObservedObject var whisperModel = WhisperModel.shared
     let timer = Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Setup").font(.largeTitle.bold())
+            PageHeader(title: "Setup")
             Text("FreeFlow needs a few permissions. Nothing ever leaves your Mac.").foregroundStyle(.secondary)
             PermissionRow(title: "Microphone", detail: "To hear you.", granted: permissions.microphone) { permissions.requestMicrophone() }
             PermissionRow(title: "Accessibility", detail: "To detect the hotkey and paste text into apps.", granted: permissions.accessibility) {
                 permissions.requestAccessibility()
             }
             PermissionRow(title: "Speech Recognition", detail: "For Apple's on-device speech model.", granted: permissions.speech) { permissions.requestSpeech() }
+            if settings.engine == .whisperLocal {
+                switch whisperModel.state {
+                case .ready:
+                    PermissionRow(title: "Whisper model", detail: "Most accurate speech recognition, on-device.", granted: true) {}
+                case .downloading(let p):
+                    HStack {
+                        Text("Downloading Whisper model…").bold()
+                        ProgressView(value: p)
+                        Text("\(Int(p * 100))%").monospacedDigit().foregroundStyle(.secondary)
+                    }
+                    .padding(12)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.secondary.opacity(0.08)))
+                case .missing, .failed:
+                    PermissionRow(title: "Whisper model (\(WhisperModel.sizeLabel), recommended)",
+                                  detail: "Much better with accents, tech words and background noise. One-time download; works offline.",
+                                  granted: false) { whisperModel.download() }
+                }
+            }
             if settings.hotkey == .fn {
                 GroupBox {
                     VStack(alignment: .leading, spacing: 6) {

@@ -9,6 +9,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var window: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Only one FreeFlow may run: two copies would both grab the hotkey and microphone and garble dictation.
+        let others = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
+            .filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
+        if !others.isEmpty {
+            NSApp.terminate(nil)
+            return
+        }
         NSApp.setActivationPolicy(.accessory)
         setupStatusItem()
         Permissions.shared.refresh()
@@ -89,13 +96,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func showWindow(_ pane: Pane) {
         window?.close()
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 620),
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 780, height: 560),
                          styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                          backing: .buffered, defer: false)
         w.title = "FreeFlow"
         w.isReleasedWhenClosed = false
         w.contentViewController = NSHostingController(rootView: MainView(pane: pane))
         w.center()
+        // Remember the size/position the user picks.
+        w.setFrameAutosaveName("FreeFlowMainWindow")
         window = w
         NSApp.activate()
         w.makeKeyAndOrderFront(nil)
@@ -108,18 +117,39 @@ func runSelfTest(path: String, bundleID: String?) async {
     do {
         let file = try AVAudioFile(forReading: URL(fileURLWithPath: path))
         let format = file.processingFormat
+        guard file.length > 0 else { print("RAW (0.00s after end of audio): "); exit(0) }
+        // Like the app: the Whisper model is already loaded before the user speaks.
+        if settings.engine == .whisperLocal { await WhisperEngine.shared.preload() }
         let session = Transcribers.makeSession(settings: settings, inputFormat: format)
         TextProcessor.prewarm(appBundleID: bundleID, command: false, settings: settings)
-        // Simulate the user speaking: the model warms up while audio arrives.
-        try await Task.sleep(for: .seconds(Double(file.length) / format.sampleRate))
+        // Simulate the user speaking: feed audio in real time, like the microphone does.
         while file.framePosition < file.length {
             guard let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4096) else { break }
             try file.read(into: buf)
             session.append(buf)
+            try await Task.sleep(for: .seconds(Double(buf.frameLength) / format.sampleRate))
         }
+        // Also produce the 16 kHz mono clip that the recorder would hand to whole-clip engines (Whisper).
+        let whole = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(file.length))!
+        file.framePosition = 0
+        try file.read(into: whole)
+        var samples16k: [Float] = []
+        if let conv = AVAudioConverter(from: format, to: AudioRecorder.whisperFormat),
+           let out = AVAudioPCMBuffer(pcmFormat: AudioRecorder.whisperFormat,
+                                      frameCapacity: AVAudioFrameCount(Double(file.length) * 16_000 / format.sampleRate) + 64) {
+            var fed = false
+            conv.convert(to: out, error: nil) { _, st in
+                if fed { st.pointee = .endOfStream; return nil }
+                fed = true; st.pointee = .haveData; return whole
+            }
+            samples16k = Array(UnsafeBufferPointer(start: out.floatChannelData![0], count: Int(out.frameLength)))
+        }
+        print("engine: \(settings.engine.rawValue), locale: '\(settings.localeID)', whisper model ready: \(WhisperModel.isReady)")
         let start = Date()
-        let raw = try await session.finish(samples16k: [])
+        let raw = try await session.finish(samples16k: samples16k)
         print("RAW (\(String(format: "%.2f", Date().timeIntervalSince(start)))s after end of audio): \(raw)")
+        Diagnostics.record(samples: [0, 0.1, -0.1], info: ["raw": raw, "source": "selftest"])
+        try? await Task.sleep(for: .seconds(1))
         let t = Date()
         let out = await TextProcessor.process(raw, appBundleID: bundleID, settings: settings)
         print("CLEAN (\(String(format: "%.2f", Date().timeIntervalSince(t)))s, provider: \(settings.cleanup.rawValue)): \(out)")
@@ -166,6 +196,59 @@ if CommandLine.arguments.contains("--mic-test") {
         print("Peak input level: \(String(format: "%.3f", recorder.peakLevel))")
     } catch {
         print("ERROR: \(error.localizedDescription)")
+    }
+    exit(0)
+}
+
+/// `FreeFlow --render <pane> <out.png> [dark]` draws a window offscreen (for checking the design).
+if let i = CommandLine.arguments.firstIndex(of: "--render"), i + 2 < CommandLine.arguments.count {
+    let args = CommandLine.arguments
+    MainActor.assumeIsolated {
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.accessory)
+        let pane = Pane(rawValue: args[i + 1]) ?? .home
+        let host = NSHostingView(rootView: MainView(pane: pane))
+        let dims = (args.count > i + 4 ? args[i + 4] : "1100x900").split(separator: "x").compactMap { Double($0) }
+        let size = NSSize(width: dims.first ?? 1100, height: dims.last ?? 900)
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .fullSizeContentView],
+                              backing: .buffered, defer: false)
+        if args.count > i + 3, args[i + 3] == "dark" { window.appearance = NSAppearance(named: .darkAqua) }
+        else { window.appearance = NSAppearance(named: .aqua) }
+        window.contentView = host
+        window.orderFrontRegardless()
+        RunLoop.main.run(until: Date().addingTimeInterval(1.5))
+        host.layoutSubtreeIfNeeded()
+        if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+            host.cacheDisplay(in: host.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: args[i + 2]))
+        }
+    }
+    exit(0)
+}
+
+/// `FreeFlow --account-test <email> <password>` signs up (or in) and backs up stats, using the app's real code.
+if let i = CommandLine.arguments.firstIndex(of: "--account-test"), i + 2 < CommandLine.arguments.count {
+    let args = CommandLine.arguments
+    Task { @MainActor in
+        let account = AccountService.shared
+        print("server:", account.server)
+        await account.signUp(name: "FreeFlow Test", email: args[i + 1], password: args[i + 2])
+        if !account.isSignedIn {
+            print("sign-up:", account.lastError ?? "?", "→ trying sign in")
+            await account.signIn(email: args[i + 1], password: args[i + 2])
+        }
+        print("signed in:", account.profile.map { "\($0.name) <\($0.email)>" } ?? "no", "| error:", account.lastError ?? "none")
+        print("last backup:", account.lastSync.map { "\($0)" } ?? "never")
+        exit(account.isSignedIn ? 0 : 1)
+    }
+    RunLoop.main.run()
+}
+
+/// `FreeFlow --history-stats` applies history cleanup and prints what's kept.
+if CommandLine.arguments.contains("--history-stats") {
+    MainActor.assumeIsolated {
+        let h = HistoryStore.shared
+        print("history items: \(h.items.count), oldest: \(h.items.last.map { "\($0.date)" } ?? "-"), lifetime words: \(h.totalWords), streak: \(h.streakDays)")
     }
     exit(0)
 }

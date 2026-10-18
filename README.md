@@ -62,15 +62,20 @@ Optionally, turn on **Launch FreeFlow at login** in FreeFlow → Settings.
 | **Dictionary** | Teach it names and jargon, and auto-fix words it mishears |
 | **Snippets** | Say "my calendar link" and your full booking URL is inserted |
 | **Styles** | Optional AI mode that adapts tone to email, chat, code or docs |
-| **History & stats** | Searchable history, words dictated, WPM and day streak |
+| **Whisper Turbo** | Optional on-device Whisper model (one-time 550 MB download): much better with accents, tech words and background noise. Transcribes while you speak, so text is ready about 1.5 s after you stop |
+| **Home dashboard** | Streak, words today, speaking speed, time saved, a GitHub-style activity heatmap and milestones |
+| **Insights** | Daily word goal, filler words (click one to auto-remove it), speaking-speed trend, time of day, and your catchphrases |
+| **History & stats** | Searchable history, auto-deleted after 15 days (you can change this). Stats are kept forever |
+| **Optional account** | Back up your stats (never your text or audio) so they survive a reinstall |
 | **25 languages** | English, Hindi, Spanish, French, German, Japanese, Chinese, Tamil, Telugu, Bengali, Marathi and more |
 
 ## Privacy
 
 - Speech-to-text runs on-device with Apple's **SpeechAnalyzer**. Audio is never uploaded or saved.
 - AI corrections and Command Mode use Apple's on-device **Foundation Models**.
-- There's no account, analytics or telemetry, and no network access except a one-time language-model download from Apple.
-- Your history is stored at `~/Library/Application Support/FreeFlow/history.json`.
+- There's no analytics or telemetry. The only network access is model downloads and, if you choose it, account backup.
+- **Account backup is optional.** It stores only aggregate stats (word counts, streak, activity, filler counts, goal, Dictionary and Snippets), never dictated text or audio. Backups run in the background a few minutes after you dictate and never slow down dictation.
+- Your history is stored at `~/Library/Application Support/FreeFlow/history.json` and is deleted automatically after 15 days (Settings → Privacy & storage).
 
 Want different models? In Settings you can point FreeFlow at a local
 [whisper.cpp](https://github.com/ggml-org/whisper.cpp) server or a local LLM through
