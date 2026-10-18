@@ -11,6 +11,12 @@
 </p>
 
 <p align="center">
+  <a href="https://freeflow-voice.vercel.app">Website</a> ·
+  <a href="https://github.com/gaurav-sunthwal/freeflow/releases">Releases</a> ·
+  <a href="https://github.com/gaurav-sunthwal/freeflow-website">Website source</a>
+</p>
+
+<p align="center">
   <a href="https://freeflow-voice.vercel.app"><b>🌐 freeflow-voice.vercel.app</b></a>
   &nbsp;·&nbsp;
   <a href="https://freeflow-voice.vercel.app/install">Install guide</a>
