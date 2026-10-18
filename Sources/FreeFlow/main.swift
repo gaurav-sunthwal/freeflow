@@ -48,7 +48,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item(recording ? "Stop Hands-free Dictation" : "Start Hands-free Dictation", #selector(toggleHandsFree), ""))
         menu.addItem(item("Paste Last Transcript", #selector(pasteLast), ""))
         menu.addItem(.separator())
-        menu.addItem(.separator())
         switch Updater.shared.status {
         case .building(let v):
             let i = NSMenuItem(title: "Preparing update \(v)…", action: nil, keyEquivalent: "")
@@ -63,6 +62,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         menu.addItem(item("Settings…", #selector(openSettings), ","))
         menu.addItem(item("Setup & Permissions", #selector(openSetup), ""))
+        menu.addItem(item("Help & Troubleshooting", #selector(openHelp), ""))
+        menu.addItem(item("FreeFlow Website", #selector(openWebsite), ""))
         menu.addItem(.separator())
         menu.addItem(item("Quit FreeFlow", #selector(quit), "q"))
     }
@@ -92,6 +93,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         Coordinator.shared.overlay.set(.message("Checking for updates…"))
     }
+    @objc private func openHelp() { NSWorkspace.shared.open(Links.help) }
+    @objc private func openWebsite() { NSWorkspace.shared.open(Links.website) }
     @objc private func quit() { NSApp.terminate(nil) }
 
     private func showWindow(_ pane: Pane) {

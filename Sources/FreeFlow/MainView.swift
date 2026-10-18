@@ -311,6 +311,17 @@ struct SettingsView: View {
                 Toggle("Play sounds", isOn: $settings.playSounds)
                 Toggle("Restore clipboard after pasting", isOn: $settings.restoreClipboard)
             }
+            Section {
+                HStack(spacing: 16) {
+                    Link("Website", destination: Links.website)
+                    Link("Help", destination: Links.help)
+                    Link("Privacy", destination: Links.privacy)
+                    Link("GitHub", destination: Links.github)
+                    Link("Report an issue", destination: Links.issues)
+                }
+            } header: { Text("About") } footer: {
+                Text("FreeFlow \(updater.currentVersion) · Free and open source (MIT)")
+            }
         }
         .formStyle(.grouped)
         .padding(12)

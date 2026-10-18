@@ -10,6 +10,29 @@
   No account, no subscription, no cloud. Everything runs on your Mac.
 </p>
 
+<p align="center">
+  <a href="https://freeflow-voice.vercel.app"><b>🌐 freeflow-voice.vercel.app</b></a>
+  &nbsp;·&nbsp;
+  <a href="https://freeflow-voice.vercel.app/install">Install guide</a>
+  &nbsp;·&nbsp;
+  <a href="https://freeflow-voice.vercel.app/wispr-flow-alternative">FreeFlow vs Wispr Flow</a>
+  &nbsp;·&nbsp;
+  <a href="https://freeflow-voice.vercel.app/privacy">Privacy</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/gaurav-sunthwal/freeflow/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/gaurav-sunthwal/freeflow?color=7d6bff"></a>
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-7d6bff"></a>
+  <img alt="macOS 26+" src="https://img.shields.io/badge/macOS-26%2B-black?logo=apple">
+  <img alt="Apple silicon" src="https://img.shields.io/badge/Apple%20silicon-M1%2B-black">
+  <a href="https://freeflow-voice.vercel.app"><img alt="Website" src="https://img.shields.io/badge/website-freeflow--voice.vercel.app-7d6bff"></a>
+</p>
+
+FreeFlow is a free, open-source alternative to paid dictation apps like Wispr Flow. You get the same hold-to-talk
+workflow (filler words removed, self-corrections, dictionary, snippets, rewriting by voice) with no word limits,
+and speech recognition that runs on your Mac instead of in the cloud.
+[See the full comparison →](https://freeflow-voice.vercel.app/wispr-flow-alternative)
+
 ---
 
 ## Install
@@ -50,6 +73,9 @@ Once it's installed you can delete the `freeflow` folder. The app in Application
 
 Optionally, turn on **Launch FreeFlow at login** in FreeFlow → Settings.
 
+Step-by-step instructions and troubleshooting are on the website:
+[freeflow-voice.vercel.app/install](https://freeflow-voice.vercel.app/install).
+
 ## Features
 
 | | |
@@ -66,20 +92,32 @@ Optionally, turn on **Launch FreeFlow at login** in FreeFlow → Settings.
 | **Home dashboard** | Streak, words today, speaking speed, time saved, a GitHub-style activity heatmap and milestones |
 | **Insights** | Daily word goal, filler words (click one to auto-remove it), speaking-speed trend, time of day, and your catchphrases |
 | **History & stats** | Searchable history, auto-deleted after 15 days (you can change this). Stats are kept forever |
-| **Optional account** | Back up your stats (never your text or audio) so they survive a reinstall |
+| **Optional account** | Back up your stats and settings (never your text or audio) so they survive a reinstall |
+| **Bring your own model** | Use a local [whisper.cpp](https://github.com/ggml-org/whisper.cpp) server for speech, or [Ollama](https://ollama.com) / LM Studio for clean-up |
+| **Auto-updates** | Installs new releases in the background, between dictations |
 | **25 languages** | English, Hindi, Spanish, French, German, Japanese, Chinese, Tamil, Telugu, Bengali, Marathi and more |
 
 ## Privacy
 
-- Speech-to-text runs on-device with Apple's **SpeechAnalyzer**. Audio is never uploaded or saved.
+- Speech-to-text runs on your Mac, with **Whisper Turbo** (whisper.cpp) or Apple's **SpeechAnalyzer**. Audio is never
+  uploaded or saved.
 - AI corrections and Command Mode use Apple's on-device **Foundation Models**.
-- There's no analytics or telemetry. The only network access is model downloads and, if you choose it, account backup.
-- **Account backup is optional.** It stores only aggregate stats (word counts, streak, activity, filler counts, goal, Dictionary and Snippets), never dictated text or audio. Backups run in the background a few minutes after you dictate and never slow down dictation.
-- Your history is stored at `~/Library/Application Support/FreeFlow/history.json` and is deleted automatically after 15 days (Settings → Privacy & storage).
+- There's no analytics or telemetry. FreeFlow only goes online to:
+  - download speech models once (Whisper Turbo from Hugging Face, language assets from Apple)
+  - check GitHub for updates (turn this off in Settings → Updates)
+  - back up to your account, only if you sign in. Backups go to the FreeFlow website's API.
+- **Account backup is optional.** It stores your name, email, a hashed password, aggregate stats (word counts,
+  streak, activity, filler counts, goal) and your Dictionary and Snippets. Never dictated text or audio. Backups run
+  in the background a few minutes after you dictate and never slow down dictation. You can delete the account and
+  its data any time from the Account screen.
+- Your history is stored at `~/Library/Application Support/FreeFlow/history.json` and is deleted automatically after
+  15 days (Settings → Privacy & storage).
+
+Full details: [freeflow-voice.vercel.app/privacy](https://freeflow-voice.vercel.app/privacy).
 
 Want different models? In Settings you can point FreeFlow at a local
 [whisper.cpp](https://github.com/ggml-org/whisper.cpp) server or a local LLM through
-[Ollama](https://ollama.com) or LM Studio.
+[Ollama](https://ollama.com) or LM Studio. If you do, your audio or text goes to the server you chose.
 
 ## Updates
 
@@ -115,10 +153,13 @@ curl -fsSL https://raw.githubusercontent.com/gaurav-sunthwal/freeflow/main/unins
 | "Developer tools are too old" | Update Xcode or the Command Line Tools to 26+ via Software Update |
 | Corrections / Command Mode don't work | Turn on Apple Intelligence in System Settings → Apple Intelligence & Siri |
 
+More help: menu-bar icon → **Help & Troubleshooting**, the [install guide](https://freeflow-voice.vercel.app/install#troubleshooting),
+or [open an issue](https://github.com/gaurav-sunthwal/freeflow/issues).
+
 ## How it works
 
 ```
-hold fn ──► CGEventTap ──► AVAudioEngine ──► SpeechAnalyzer (on-device, streamed live)
+hold fn ──► CGEventTap ──► AVAudioEngine ──► Whisper Turbo or SpeechAnalyzer (on-device, streamed live)
                                                    │
 release ──► rules (fillers, "scratch that", snippets, dictionary)
                                                    │
@@ -132,10 +173,15 @@ release ──► rules (fillers, "scratch that", snippets, dictionary)
 | `Sources/FreeFlow/Coordinator.swift` | Hotkey → record → transcribe → clean → insert |
 | `Sources/FreeFlow/HotkeyMonitor.swift` | Push-to-talk, double-tap, Command Mode, Esc |
 | `Sources/FreeFlow/Transcriber.swift` | Apple SpeechAnalyzer streaming, plus Whisper-server support |
+| `Sources/FreeFlow/WhisperEngine.swift` | On-device Whisper Turbo (whisper.cpp + Metal), transcribing while you speak |
 | `Sources/FreeFlow/TextProcessor.swift` | Rules, snippets, dictionary, self-corrections, LLM safety checks |
 | `Sources/FreeFlow/TextInserter.swift` | Clipboard-safe paste and selected-text capture |
 | `Sources/FreeFlow/Overlay.swift` | The floating "Flow bar" |
 | `Sources/FreeFlow/MainView.swift` | Home, Dictionary, Snippets, Style, Settings, Setup |
+| `Sources/FreeFlow/DashboardView.swift`, `InsightsView.swift` | Home dashboard and Insights |
+| `Sources/FreeFlow/Account.swift` | Optional account and background stats backup |
+| `Sources/FreeFlow/Updater.swift` | Self-updates from GitHub releases |
+| `Sources/FreeFlow/Links.swift` | Website, help and GitHub links used in the app |
 
 ## Development
 
@@ -163,3 +209,5 @@ Contributions are welcome. Open an issue or a pull request.
 ## License
 
 [MIT](LICENSE). Free to use, modify and share.
+
+Website: [freeflow-voice.vercel.app](https://freeflow-voice.vercel.app)
