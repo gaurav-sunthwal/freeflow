@@ -7,6 +7,7 @@ final class OverlayModel: ObservableObject {
     @Published var levels: [CGFloat] = Array(repeating: 0.05, count: 18)
     @Published var handsFree = false
     @Published var commandMode = false
+    @Published var preview = ""
 
     func push(level: Float) {
         levels.removeFirst()
@@ -21,7 +22,7 @@ final class OverlayController {
     private var hideWork: DispatchWorkItem?
 
     init() {
-        let size = NSSize(width: 220, height: 44)
+        let size = NSSize(width: 520, height: 44)
         panel = NSPanel(contentRect: NSRect(origin: .zero, size: size),
                         styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         // Full-screen apps (e.g. Chrome in full screen) live in their own Space above normal windows;
@@ -88,11 +89,19 @@ struct OverlayView: View {
                 }
                 .animation(.linear(duration: 0.08), value: model.levels)
                 if model.handsFree { Image(systemName: "lock.fill").font(.system(size: 10)).foregroundStyle(.white.opacity(0.8)) }
+                if !model.preview.isEmpty {
+                    Text(model.preview)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                        .frame(maxWidth: 300, alignment: .trailing)
+                }
             case .processing:
                 ProgressView().controlSize(.small).tint(.white)
                 Text(model.commandMode ? "Thinking…" : "Transcribing…").font(.system(size: 12, weight: .medium)).foregroundStyle(.white)
             case .message(let m):
-                Text(m).font(.system(size: 11, weight: .medium)).foregroundStyle(.white).lineLimit(2)
+                Text(m).font(.system(size: 11, weight: .medium)).foregroundStyle(.white).lineLimit(2).frame(maxWidth: 440)
             case .hidden:
                 EmptyView()
             }
@@ -101,6 +110,7 @@ struct OverlayView: View {
         .frame(height: 34)
         .background(Capsule().fill(Color.black.opacity(0.85)))
         .overlay(Capsule().stroke(.white.opacity(0.15), lineWidth: 1))
+        .fixedSize()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

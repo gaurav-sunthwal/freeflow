@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import AVFoundation
+import CoreAudio
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -98,6 +99,47 @@ func runSelfTest(path: String, bundleID: String?) async {
         let t = Date()
         let out = await TextProcessor.process(raw, appBundleID: bundleID, settings: settings)
         print("CLEAN (\(String(format: "%.2f", Date().timeIntervalSince(t)))s, provider: \(settings.cleanup.rawValue)): \(out)")
+    } catch {
+        print("ERROR: \(error.localizedDescription)")
+    }
+    exit(0)
+}
+
+/// `FreeFlow --mic-test` records 2 s like a dictation and reports which microphone was used,
+/// whether Bluetooth headphones stayed in high-quality mode, and whether other audio was muted.
+if CommandLine.arguments.contains("--mic-test") {
+    func outputRate() -> Double {
+        guard let dev = AudioDevices.defaultOutput else { return 0 }
+        var addr = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyNominalSampleRate,
+                                              mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var rate = Float64(0); var size = UInt32(8)
+        AudioObjectGetPropertyData(dev, &addr, 0, nil, &size, &rate)
+        return rate
+    }
+    func muted() -> Bool {
+        guard let dev = AudioDevices.defaultOutput else { return false }
+        var addr = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyMute,
+                                              mScope: kAudioDevicePropertyScopeOutput, mElement: kAudioObjectPropertyElementMain)
+        var v = UInt32(0); var size = UInt32(4)
+        AudioObjectGetPropertyData(dev, &addr, 0, nil, &size, &v)
+        return v != 0
+    }
+    let pref = Settings.shared.micDevice
+    let uid = AudioDevices.inputDeviceUID(for: pref)
+    let name = AudioDevices.inputDevices().first { uid != nil ? $0.uid == uid : $0.id == AudioDevices.defaultInput }?.name ?? "unknown"
+    print("Microphone preference: \(pref.isEmpty ? "automatic" : pref) → using \(name)")
+    print("Output before:    \(outputRate()) Hz, muted: \(muted())")
+    let recorder = AudioRecorder()
+    do {
+        try recorder.start(deviceUID: uid)
+        AudioDevices.muteOutput()
+        Thread.sleep(forTimeInterval: 2)
+        print("While recording:  \(outputRate()) Hz, muted: \(muted())")
+        recorder.stop()
+        AudioDevices.restoreOutput()
+        Thread.sleep(forTimeInterval: 2)
+        print("After recording:  \(outputRate()) Hz, muted: \(muted())")
+        print("Peak input level: \(String(format: "%.3f", recorder.peakLevel))")
     } catch {
         print("ERROR: \(error.localizedDescription)")
     }

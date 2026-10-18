@@ -226,6 +226,7 @@ struct StyleView: View {
 struct SettingsView: View {
     @ObservedObject var settings = Settings.shared
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+    @State private var mics: [AudioInputDevice] = []
     @State private var assetStatus = ""
 
     var body: some View {
@@ -262,6 +263,18 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                 }
             }
+            Section {
+                Picker("Microphone", selection: $settings.micDevice) {
+                    Text("Automatic").tag("")
+                    Text("System default").tag("system")
+                    ForEach(mics) { Text($0.name).tag($0.uid) }
+                }
+                Toggle("Mute other audio while dictating", isOn: $settings.muteWhileDictating)
+                Toggle("Show live preview in the Flow bar", isOn: $settings.livePreview)
+            } header: { Text("Microphone") } footer: {
+                Text("Automatic uses your Mac's built-in mic when you're wearing Bluetooth headphones, so music and videos keep playing in full quality instead of switching to \"phone call\" sound.")
+            }
+            .onAppear { mics = AudioDevices.inputDevices() }
             Section("Behaviour") {
                 Toggle("Launch FreeFlow at login", isOn: Binding(
                     get: { launchAtLogin },

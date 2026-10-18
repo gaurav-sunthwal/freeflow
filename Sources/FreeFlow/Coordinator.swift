@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import Carbon
 
 /// Orchestrates hotkey → record → transcribe → clean up → insert.
 @MainActor
@@ -21,6 +22,8 @@ final class Coordinator: ObservableObject {
     private var pendingSelection: Task<String?, Never>?
 
     func start() {
+        // If FreeFlow quit while it had muted other audio, give the user their sound back.
+        AudioDevices.restoreOutput()
         hotkeys.isRecording = { [weak self] in
             // Read from the event-tap thread; a stale value is harmless here.
             MainActor.assumeIsolated { self?.state == .recording }
@@ -70,12 +73,20 @@ final class Coordinator: ObservableObject {
         pendingSelection = command ? Task { await TextInserter.selectedText() } : nil
         TextProcessor.prewarm(appBundleID: targetApp?.bundleIdentifier, command: command, settings: settings)
 
-        let s = Transcribers.makeSession(settings: settings, inputFormat: recorder.inputFormat)
-        session = s
-        recorder.onBuffer = { [weak s] buf in s?.append(buf) }
         do {
-            try recorder.start()
+            let s = Transcribers.makeSession(settings: settings, inputFormat: recorder.format)
+            session = s
+            overlay.model.preview = ""
+            if settings.livePreview {
+                s.onPartial = { [weak self] text in
+                    guard let self, self.state == .recording else { return }
+                    self.overlay.model.preview = text
+                }
+            }
+            recorder.onBuffer = { [weak s] buf in s?.append(buf) }
+            try recorder.start(deviceUID: AudioDevices.inputDeviceUID(for: settings.micDevice))
         } catch {
+            recorder.stop()
             session = nil
             overlay.set(.message("Mic error: \(error.localizedDescription)"))
             hotkeys.reset()
@@ -86,12 +97,20 @@ final class Coordinator: ObservableObject {
         overlay.model.handsFree = handsFree
         overlay.set(.listening)
         if settings.playSounds { NSSound(named: "Tink")?.play() }
+        if settings.muteWhileDictating {
+            // Let the start sound play, then silence videos/music until the user stops talking.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                guard self?.state == .recording else { return }
+                AudioDevices.muteOutput()
+            }
+        }
     }
 
     private func cancelRecording() {
         guard state == .recording else { return }
         recorder.stop()
         recorder.onBuffer = nil
+        AudioDevices.restoreOutput()
         session?.cancel()
         session = nil
         pendingSelection?.cancel()
@@ -104,7 +123,9 @@ final class Coordinator: ObservableObject {
         guard state == .recording, let session else { return }
         recorder.stop()
         recorder.onBuffer = nil
+        AudioDevices.restoreOutput()
         let duration = recorder.duration
+        let peak = recorder.peakLevel
         let samples = recorder.takeSamples()
         self.session = nil
         state = .processing
@@ -119,7 +140,11 @@ final class Coordinator: ObservableObject {
             defer { self.state = .idle }
             do {
                 let raw = try await session.finish(samples16k: samples)
-                guard !raw.isEmpty else { overlay.set(.hidden); return }
+                guard !raw.isEmpty else {
+                    // Silence usually means the wrong or a muted microphone was picked up.
+                    overlay.set(duration > 1 && peak < 0.02 ? .message("No sound detected — check your microphone in Settings") : .hidden)
+                    return
+                }
 
                 let output: String
                 if command {
@@ -131,6 +156,15 @@ final class Coordinator: ObservableObject {
                 guard !output.isEmpty else { overlay.set(.hidden); return }
 
                 if let app, app != NSWorkspace.shared.frontmostApplication { app.activate() }
+                if IsSecureEventInputEnabled() {
+                    // Password fields block simulated typing; hand the text over via the clipboard instead.
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(output, forType: .string)
+                    history.add(HistoryItem(date: Date(), raw: raw, text: output,
+                                            app: app?.localizedName ?? "Unknown", duration: duration, isCommand: command))
+                    overlay.set(.message("Secure text field — copied, press ⌘V to paste"))
+                    return
+                }
                 TextInserter.insert(output, restoreClipboard: settings.restoreClipboard)
                 history.add(HistoryItem(date: Date(), raw: raw, text: output,
                                         app: app?.localizedName ?? "Unknown", duration: duration, isCommand: command))

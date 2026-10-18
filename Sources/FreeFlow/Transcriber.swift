@@ -3,6 +3,8 @@ import Speech
 
 /// A single dictation: audio is appended while recording, then `finish()` returns the text.
 protocol TranscriptionSession: AnyObject {
+    /// Live text while the user is still speaking (finalized + in-progress words). Called on the main queue.
+    var onPartial: ((String) -> Void)? { get set }
     func append(_ buffer: AVAudioPCMBuffer)
     func finish(samples16k: [Float]) async throws -> String
     func cancel()
@@ -47,6 +49,7 @@ enum Transcribers {
 /// Streams audio into Apple's on-device SpeechAnalyzer while the user speaks,
 /// so the text is ready almost as soon as the hotkey is released.
 final class AppleSpeechSession: TranscriptionSession {
+    var onPartial: ((String) -> Void)?
     private let lock = NSLock()
     private var pending: [AVAudioPCMBuffer] = []
     private var continuation: AsyncStream<AnalyzerInput>.Continuation?
@@ -61,7 +64,8 @@ final class AppleSpeechSession: TranscriptionSession {
             guard let supported = await SpeechTranscriber.supportedLocale(equivalentTo: locale) else {
                 throw TranscriberError.unsupportedLocale(locale.identifier)
             }
-            let transcriber = SpeechTranscriber(locale: supported, preset: .transcription)
+            let transcriber = SpeechTranscriber(locale: supported, transcriptionOptions: [],
+                                                reportingOptions: [.volatileResults], attributeOptions: [])
             if let req = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
                 try await req.downloadAndInstall()
             }
@@ -73,10 +77,13 @@ final class AppleSpeechSession: TranscriptionSession {
                 ctx.contextualStrings[.general] = vocabulary
                 try? await analyzer.setContext(ctx)
             }
-            let results = Task<String, Error> {
+            let results = Task<String, Error> { [weak self] in
                 var text = ""
-                for try await r in transcriber.results where r.isFinal {
-                    text += String(r.text.characters)
+                for try await r in transcriber.results {
+                    let piece = String(r.text.characters)
+                    if r.isFinal { text += piece }
+                    let live = r.isFinal ? text : text + piece
+                    DispatchQueue.main.async { self?.onPartial?(live) }
                 }
                 return text
             }
@@ -149,6 +156,7 @@ final class AppleSpeechSession: TranscriptionSession {
 /// Sends the recorded clip to any OpenAI-compatible `/audio/transcriptions` endpoint,
 /// e.g. a local whisper.cpp server (`whisper-server --inference-path /v1/audio/transcriptions`).
 final class WhisperAPISession: TranscriptionSession {
+    var onPartial: ((String) -> Void)?
     private let settings: Settings
     private var task: URLSessionDataTask?
 

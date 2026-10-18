@@ -81,6 +81,10 @@ final class Settings: ObservableObject {
     @Published var contextAwareStyles: Bool { didSet { d.set(contextAwareStyles, forKey: "contextAwareStyles") } }
     @Published var playSounds: Bool { didSet { d.set(playSounds, forKey: "playSounds") } }
     @Published var restoreClipboard: Bool { didSet { d.set(restoreClipboard, forKey: "restoreClipboard") } }
+    /// "" = automatic (built-in mic when the default mic is Bluetooth), "system" = system default, else a device UID.
+    @Published var micDevice: String { didSet { d.set(micDevice, forKey: "micDevice") } }
+    @Published var muteWhileDictating: Bool { didSet { d.set(muteWhileDictating, forKey: "muteWhileDictating") } }
+    @Published var livePreview: Bool { didSet { d.set(livePreview, forKey: "livePreview") } }
     @Published var customInstructions: String { didSet { d.set(customInstructions, forKey: "customInstructions") } }
     @Published var dictionary: [DictionaryEntry] { didSet { save(dictionary, "dictionary") } }
     @Published var snippets: [Snippet] { didSet { save(snippets, "snippets") } }
@@ -100,6 +104,9 @@ final class Settings: ObservableObject {
         contextAwareStyles = d.object(forKey: "contextAwareStyles") as? Bool ?? true
         playSounds = d.object(forKey: "playSounds") as? Bool ?? true
         restoreClipboard = d.object(forKey: "restoreClipboard") as? Bool ?? true
+        micDevice = d.string(forKey: "micDevice") ?? ""
+        muteWhileDictating = d.object(forKey: "muteWhileDictating") as? Bool ?? true
+        livePreview = d.object(forKey: "livePreview") as? Bool ?? true
         customInstructions = d.string(forKey: "customInstructions") ?? ""
         dictionary = Settings.load("dictionary") ?? []
         snippets = Settings.load("snippets") ?? []
